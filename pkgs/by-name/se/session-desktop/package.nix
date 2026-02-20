@@ -17,6 +17,7 @@
   electron,
   jq,
   python3,
+  pnpm,
   git,
   cmake,
   openssl,
@@ -108,14 +109,14 @@ let
 
   libsession-util-nodejs = stdenv.mkDerivation (finalAttrs: {
     pname = "libsession-util-nodejs";
-    version = "0.6.5"; # find version in yarn.lock
+    version = "0.6.12"; # find version in yarn.lock
     src = fetchFromGitHub {
       owner = "session-foundation";
       repo = "libsession-util-nodejs";
       tag = "v${finalAttrs.version}";
       fetchSubmodules = true;
       deepClone = true; # need git rev for all submodules
-      hash = "sha256-T6qjpXZPGkRfBcJCd/4XGNEBZILEG2Py2zN8W2c1Tlc=";
+      hash = "sha256-6+eAofi4uapRKqJvCrekP7MWTfdd4VhOnSbc/8rsFic=";
       # fetchgit is not reproducible with deepClone + fetchSubmodules:
       # https://github.com/NixOS/nixpkgs/issues/100498
       postFetch = ''
@@ -133,9 +134,7 @@ let
     '';
 
     nativeBuildInputs = [
-      yarnConfigHook
-      yarnBuildHook
-      yarnInstallHook
+      pnpm.configHook
       nodejs
       cmake
       python3
@@ -144,9 +143,10 @@ let
     ];
 
     dontUseCmakeConfigure = true;
-    yarnOfflineCache = fetchYarnDeps {
-      yarnLock = "${finalAttrs.src}/yarn.lock";
-      hash = "sha256-0pH88EOqxG/kg7edaWnaLEs3iqhIoRCJxDdBn4JxYeY=";
+    pnpmDeps = pnpm.fetchDeps {
+      pname = "libsession-util-nodejs-deps";
+      fetcherVersion = 1;
+      hash = "sha256-ismD7a7CxiADI20LHf6O4M8TMp8OsOxcIH2a9QaF37Y=";
     };
 
     preBuild = ''
@@ -155,13 +155,7 @@ let
       ln -s ${electron.headers} "$HOME/.cmake-js/electron-${stdenv.hostPlatform.node.arch}/v${electron.version}"
     '';
 
-    # The install script is the build script.
-    # `yarn install` may be better than `yarn run install`.
-    # However, the former seems to use /bin/bash while the latter uses stdenv.shell,
-    # and the former simply cannot find the cmake-js command, which is pretty weird,
-    # and using `yarn config set script-shell` does not help.
-    yarnBuildScript = "run";
-    yarnBuildFlags = "install";
+    buildPhase = "npm run install";
 
     postInstall = ''
       # build is not installed by default because it is in .gitignore
@@ -179,13 +173,13 @@ let
 in
 stdenv.mkDerivation (finalAttrs: {
   pname = "session-desktop";
-  version = "1.17.5";
+  version = "1.17.10";
   src = fetchFromGitHub {
     owner = "session-foundation";
     repo = "session-desktop";
     tag = "v${finalAttrs.version}";
     leaveDotGit = true;
-    hash = "sha256-qx5e3HfmhB7Edr+KYK+SJfQhF19ct/40v6eIqExw+iU=";
+    hash = "sha256-i2xfk/HSFmbUlVjm8cKL/NeJk07bEjmclrkDM1+3uVE=";
     postFetch = ''
       pushd $out
       git rev-parse HEAD > .gitrev
@@ -206,9 +200,7 @@ stdenv.mkDerivation (finalAttrs: {
   nativeBuildInputs = [
     copyDesktopItems
     makeWrapper
-    yarnConfigHook
-    yarnBuildHook
-    yarnInstallHook
+    pnpm.configHook
     nodejs
     jq
     python3
@@ -226,15 +218,12 @@ stdenv.mkDerivation (finalAttrs: {
   };
 
   dontUseCmakeConfigure = true;
-  yarnOfflineCache = fetchYarnDeps {
-    # Future maintainers: keep in mind that sometimes the upstream deduplicates dependencies
-    # (see the `dedup` script in package.json) before committing yarn.lock,
-    # which may unfortunately break the offline cache (and may not).
-    # If that happens, clone the repo and run `yarn install --ignore-scripts` yourself,
-    # copy the modified yarn.lock here, and use `./yarn.lock` instead of `"${finalAttrs.src}/yarn.lock"`,
-    # and also add `cp ${./yarn.lock} yarn.lock` to postPatch.
-    yarnLock = "${finalAttrs.src}/yarn.lock";
-    hash = "sha256-5MqCwXe/BflIymZiggtAE6XgBa/S4Qoh7KzWokU+L5c=";
+  pnpmDeps = pnpm.fetchDeps {
+    pname = "session-desktop-deps";
+    fetcherVersion = 1;
+    version = finalAttrs.version;
+    src = finalAttrs.src;
+    hash = "";
   };
 
   preBuild = ''
@@ -259,13 +248,15 @@ stdenv.mkDerivation (finalAttrs: {
     rm -rf node_modules/libsession_util_nodejs/node_modules
 
     # some important things that did not run because of --ignore-scripts
-    yarn run postinstall
+    pnpm run postinstall
   '';
 
   preInstall = ''
     # Do not want yarn prune to remove native modules that we just built.
     mv node_modules node_modules.dev
   '';
+
+  buildPhase = "pnpm run build";
 
   postInstall = ''
     find node_modules.dev -mindepth 2 -maxdepth 3 -type d -name build  | while read -r buildDir; do
